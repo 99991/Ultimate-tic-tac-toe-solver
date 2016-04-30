@@ -1,302 +1,414 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <string.h>
-#include <assert.h>
-#include <array>
-#include <vector>
-#include <algorithm>
-#include <limits>
+#include "common.hpp"
 
-#define INF std::numeric_limits<double>::infinity()
-#define NONE 0xff
-#define UNUSED(x) ((void)x)
+#define NONE 0
+#define TIE  3
 
-typedef uint8_t u8;
-typedef uint32_t u32;
-
-u32 rd(){
-    static u32 x = 0x12345678;
-    x ^= x << 13;
-    x ^= x >> 17;
-    x ^= x << 5;
-    return x;
-}
-
-u32 rd(u32 n){
-    return rd() % n;
-}
-
-typedef std::array<u8, 3> ThreeMoves;
-
-constexpr std::array<ThreeMoves, 3 + 3 + 2> winning_positions = {
-    ThreeMoves{0, 1, 2},
-    ThreeMoves{3, 4, 5},
-    ThreeMoves{6, 7, 8},
-
-    ThreeMoves{0, 3, 6},
-    ThreeMoves{1, 4, 7},
-    ThreeMoves{2, 5, 8},
-
-    ThreeMoves{0, 4, 8},
-    ThreeMoves{2, 4, 6},
-};
-
-struct Cell {
-    u8 winner;
-
-    Cell(): winner(0){}
-};
-
-template <typename CELL>
-struct Board : Cell {
-    std::array<CELL, 9> cells;
-
-    const CELL& operator [] (u8 i) const {
-        assert(i < 9);
-        return cells[i];
-    }
-
-    CELL& operator [] (u8 i){
-        assert(i < 9);
-        return cells[i];
-    }
-
-    u32 has_won(u8 player, ThreeMoves moves) const {
-        for (u8 move : moves){
-            if (cells[move].winner != player){
-                return false;
-            }
-        }
-        return true;
-    }
-
-    bool has_won(u8 player) const {
-        for (ThreeMoves moves : winning_positions){
-            if (has_won(player, moves)) return true;
-        }
-        return false;
-    }
-
-    void get_moves(std::vector<u8> &moves) const {
-        if (has_won(1) || has_won(2)) return;
-        for (u8 move = 0; move < 9; move++){
-            if (cells[move].winner == 0) moves.push_back(move);
-        }
-    }
-
-    bool has_moves(){
-        std::vector<u8> moves;
-        get_moves(moves);
-        return !moves.empty();
-    }
-};
-
-typedef Board<Cell> SmallBoard;
-typedef Board<SmallBoard> BigBoard;
-
-u8 get_random(std::vector<u8> &values){
-    size_t index = rd(values.size());
-    return values[index];
-}
-
-void print(const BigBoard &big_board){
-    for (int y = 0; y < 3; y++){
-        for (int i = 0; i < 3; i++){
-            printf("| ");
-            for (int x = 0; x < 3; x++){
-                const SmallBoard &board = big_board[x + y*3];
-                printf("%i %i %i | ", board[0 + i*3].winner, board[1 + i*3].winner, board[2 + i*3].winner);
-            }
-            printf("\n");
-        }
-
-
-        for (int i = 0; i < 3; i++) printf("+-------");
-        printf("+\n");
-    }
-    printf("\n");
-}
-
-struct Node {
-    SmallBoard small_board;
-
-    double heuristic() const {
-        switch (small_board.winner){
-        case 1: return +INF;
-        case 2: return -INF;
-        default: return 0;
-        }
-    }
-
-    bool is_terminal() const {
-        std::vector<u8> moves;
-        small_board.get_moves(moves);
-        return moves.empty();
-    }
-
-    std::vector<Node> get_children(u8 player){
-        std::vector<u8> moves;
-        small_board.get_moves(moves);
-
-        std::vector<Node> children;
-
-        for (u8 move : moves){
-            Node child;
-            child.small_board = small_board;
-            child.small_board[move].winner = player;
-            if (child.small_board.has_won(player)){
-                child.small_board.winner = player;
-            }
-            children.push_back(child);
-        }
-
-        return children;
-    }
-};
-
-double alphabeta(Node node, int depth, double alpha, double beta, u8 player){
-    if (depth == 0 || node.is_terminal()){
-        return node.heuristic();
-    }
-
-    u8 next_player = player == 1 ? 2 : 1;
-
-    if (player == 1){
-        double value = -INF;
-        for (Node child : node.get_children(player)){
-            double new_value = alphabeta(child, depth - 1, alpha, beta, next_player);
-            if (value < new_value){
-                value = new_value;
-            }
-            alpha = std::max(alpha, value);
-            if (beta <= alpha) break;
-        }
-        return value;
-    }else{
-        double value = +INF;
-        for (Node child : node.get_children(player)){
-            double new_value = alphabeta(child, depth - 1, alpha, beta, next_player);
-            if (value > new_value){
-                value = new_value;
-            }
-            beta = std::min(beta, value);
-            if (beta <= alpha) break;
-        }
-        return value;
-    }
-}
+#define MAX_SCORE (1000*1000)
 
 struct Move {
     u8 big_move;
     u8 small_move;
 };
 
-Move get_random_move(const BigBoard &big_board, u8 big_move, u8 player){
-    // random move does not depend on player
-    UNUSED(player);
+typedef Array<u8, 3> ThreeMoves;
 
-    std::vector<u8> non_finished_small_boards;
-    std::array<std::vector<u8>, 9> available_fields;
+constexpr Array<ThreeMoves, 3 + 3 + 2> wins = {
+    ThreeMoves{0, 1, 2}, // 0
+    ThreeMoves{3, 4, 5}, // 1
+    ThreeMoves{6, 7, 8}, // 2
 
-    // get all usable empty fields
-    for (u8 i = 0; i < 9; i++){
-        big_board[i].get_moves(available_fields[i]);
-        if (!available_fields[i].empty()){
-            non_finished_small_boards.push_back(i);
+    ThreeMoves{0, 3, 6}, // 3
+    ThreeMoves{1, 4, 7}, // 4
+    ThreeMoves{2, 5, 8}, // 5
+
+    ThreeMoves{0, 4, 8}, // 6
+    ThreeMoves{2, 4, 6}, // 7
+};
+
+u8 micro_board_winner[1 << 18];
+int micro_board_score[1 << 18];
+
+template <typename BOARD>
+bool is_winner(const BOARD &board, u8 player, ThreeMoves moves){
+    for (u8 move : moves){
+        if (board.get(move) != player){
+            return false;
+        }
+    }
+    return true;
+}
+
+template <typename BOARD>
+bool is_winner(const BOARD &board, u8 player){
+    for (ThreeMoves moves : wins){
+        if (is_winner(board, player, moves)){
+            return true;
+        }
+    }
+    return false;
+}
+
+struct MicroBoard {
+    u32 fields;
+    u8 n_moves;
+
+    MicroBoard(): fields(0), n_moves(9){
+        for (u8 move = 0; move < 9; move++){
+            unsafe_set(move, NONE);
         }
     }
 
-    // if big board is not forced, choose one at random
-    if (big_move == NONE){
-        big_move = get_random(non_finished_small_boards);
-        printf("Error: no big board selected, choose %u at random\n", big_move);
+    void unsafe_set(u8 move, u8 player){
+        fields |= player << move*2;
     }
 
-    if (available_fields[big_move].empty()){
-        printf("no more empty fields available in big board %u\n", big_move);
-        exit(-1);
+    u8 get(u8 move) const {
+        return (fields >> move*2) & 3;
     }
 
-    // choose move in small board at random
-    u8 small_board_move = get_random(available_fields[big_move]);
+    void clr(u8 move){
+        assert(get(move) != NONE);
+        n_moves++;
+        fields &= ~(u32(3) << move*2);
+    }
 
-    return Move{big_move, small_board_move};
-}
+    bool can_play(u8 move) const {
+        return get(move) == NONE;
+    }
 
-void play(){
-    BigBoard big_board;
+    u8 play(u8 move, u8 player){
+        assert(can_play(move));
+        n_moves--;
 
-    auto get_player1_move = get_random_move;
-    auto get_player2_move = get_random_move;
+        unsafe_set(move, player);
 
-    u8 player = 1;
-    u8 big_move = NONE;
+#if 1
+        if (player == TIE) return n_moves == 0 ? TIE : NONE;
 
-    for (u32 round = 0; round < 3*3*3*3; round++){
-        printf("round %u\n", round);
+        return micro_board_winner[fields];
+#else
+        if (player != TIE && ::is_winner(*this, player)){
+            return player;
+        }
 
-        auto get_move = (player == 1) ? get_player1_move : get_player2_move;
+        return n_moves == 0 ? TIE : NONE;
+#endif
+    }
 
-        Move move = get_move(big_board, big_move, player);
+    void print(){
+        printf("+-------+\n");
+        for (int y = 0; y < 3; y++){
+            printf("| ");
+            for (int x = 0; x < 3; x++){
+                printf("%i ", get(x + y*3));
+            }
+            printf("|\n");
+        }
+        printf("+-------+\n\n");
+    }
 
-        printf("player %u places at %u %u\n", player, move.big_move, move.small_move);
+    int get_heuristic_score(u8 player) const {
+        int score = 0;
+        for (u8 move = 0; move < 9; move++){
+            score += (get(move) == player);
+        }
+        return score;
+    }
 
-        assert(big_move == NONE || move.big_move == big_move);
+    int heuristic() const {
+        return get_heuristic_score(1) - get_heuristic_score(2);
+    }
+};
 
-        SmallBoard &small_board = big_board[move.big_move];
+struct MacroBoard {
+    Array<MicroBoard, 9> micro_boards;
+    MicroBoard winners;
+    SmallVector<Move, 3*3*3*3> moves;
 
-        assert(small_board.has_moves());
+    bool can_play_anywhere() const {
+        // if no moves done yet
+        if (moves.empty()) return true;
 
-        Cell &cell = small_board[move.small_move];
+        // if forced small board is decided already
+        return !winners.can_play(moves.back().small_move);
+    }
 
-        assert(cell.winner == 0);
+    bool can_play_big_move(u8 big_move) const {
+        // if small board is decided already, it can't be played
+        if (!winners.can_play(big_move)) return false;
 
-        cell.winner = player;
+        if (can_play_anywhere()) return true;
 
-        print(big_board);
+        return moves.back().small_move == big_move;
+    }
 
-        if (small_board.has_won(player)){
-            small_board.winner = player;
+    bool can_play(Move move) const {
 
-            big_move = NONE;
+        if (!can_play_big_move(move.big_move)) return false;
 
-            if (big_board.has_won(player)){
-                big_board.winner = player;
+        // small field to play must still be empty
+        if (!micro_boards[move.big_move].can_play(move.small_move)) return false;
 
-                printf("player %u wins\n", player);
+        return true;
+    }
 
-                break;
+    void undo(){
+        assert(!moves.empty());
+        Move move = moves.back();
+        if (winners.get(move.big_move) != NONE){
+            winners.clr(move.big_move);
+        }
+        micro_boards[move.big_move].clr(move.small_move);
+        moves.pop_back();
+    }
+
+    u8 play(Move move, u8 player){
+        assert(can_play(move));
+
+        moves.push_back(move);
+
+        u8 winner = micro_boards[move.big_move].play(move.small_move, player);
+        if (winner != NONE){
+            winner = winners.play(move.big_move, winner);
+            if (winner != NONE){
+                return winner;
             }
         }
 
-        big_move = move.small_move;
+        return NONE;
+    }
 
-        if (!big_board[big_move].has_moves()){
-            big_move = -1;
+    void print(){
+        for (int i = 0; i < 3; i++) printf("+-------");
+        printf("+\n");
+
+        for (int y = 0; y < 3; y++){
+            for (int i = 0; i < 3; i++){
+                printf("| ");
+                for (int x = 0; x < 3; x++){
+                    const MicroBoard &micro_board = micro_boards[x + y*3];
+                    u8 a = micro_board.get(0 + i*3);
+                    u8 b = micro_board.get(1 + i*3);
+                    u8 c = micro_board.get(2 + i*3);
+                    printf("%i %i %i | ", a, b, c);
+                }
+                printf("\n");
+            }
+
+            for (int i = 0; i < 3; i++) printf("+-------");
+            printf("+\n");
+        }
+        winners.print();
+        printf("\n\n");
+    }
+};
+
+Move get_random_move(const MacroBoard &macro_board, u8 player){
+    UNUSED(player);
+
+    SmallVector<Move, 3*3*3*3> moves;
+    for (u8 big_move = 0; big_move < 9; big_move++){
+        if (!macro_board.can_play_big_move(big_move)) continue;
+        const MicroBoard &micro_board = macro_board.micro_boards[big_move];
+        for (u8 small_move = 0; small_move < 9; small_move++){
+            if (!micro_board.can_play(small_move)) continue;
+            Move move{big_move, small_move};
+            moves.push_back(move);
+        }
+    }
+
+    assert(!moves.empty());
+
+    return moves[rd() % moves.size()];
+}
+
+template <typename GET_MOVE_PLAYER1, typename GET_MOVE_PLAYER2>
+u8 get_winner(GET_MOVE_PLAYER1 &get_move_player1, GET_MOVE_PLAYER2 &get_move_player2){
+    MacroBoard macro_board;
+
+    u8 player = 1;
+
+    for (int round = 0; round < 3*3*3*3; round++){
+
+        Move move;
+        if (player == 1){
+            move = get_move_player1(macro_board, player);
+        }else{
+            move = get_move_player2(macro_board, player);
+        }
+
+        u8 winner = macro_board.play(move, player);
+
+        if (winner != NONE){
+            return winner;
         }
 
         player = (player == 1) ? 2 : 1;
     }
+
+    return TIE;
 }
 
+struct MacroScore {
+    int value;
+    SmallVector<Move, 81> moves;
+};
+
+struct MacroAlphaBeta {
+    MacroBoard macro_board;
+
+    int lookahead;
+
+    MacroAlphaBeta(int lookahead): lookahead(lookahead){}
+
+    MacroScore descend(u8 player, int depth, int alpha = -MAX_SCORE, int beta = +MAX_SCORE){
+        u8 opponent = player ^ 3;
+
+        if (depth == 0){
+#if 0
+            int score = macro_board.winners.heuristic();
+#else
+            int score = micro_board_score[macro_board.winners.fields];
+#endif
+            if (player == 2) score = -score;
+            return MacroScore{score, macro_board.moves};
+        }
+
+        MacroScore best_score;
+        bool no_score = true;
+        best_score.value = -MAX_SCORE;
+
+        constexpr static Array<u8, 9> move_order{4, 0, 2, 6, 8, 1, 3, 5, 7};
+        for (u8 big_move : move_order){
+            if (!macro_board.can_play_big_move(big_move)) continue;
+            const MicroBoard &micro_board = macro_board.micro_boards[big_move];
+            for (u8 small_move : move_order){
+                if (!micro_board.can_play(small_move)) continue;
+                Move move{big_move, small_move};
+
+                u8 winner = macro_board.play(move, player);
+
+                MacroScore new_score;
+
+                if (winner == NONE){
+                    new_score = descend(opponent, depth - 1, -beta, -alpha);
+                    new_score.value = -new_score.value;
+                }else if (winner == TIE){
+                    new_score = MacroScore{0, macro_board.moves};
+                }else{
+                    int score = (player == winner) ? +MAX_SCORE : -MAX_SCORE;
+                    new_score = MacroScore{score, macro_board.moves};
+                }
+
+                macro_board.undo();
+
+                if (no_score || best_score.value < new_score.value){
+                    no_score = false;
+                    best_score = new_score;
+                }
+                if (alpha < best_score.value) alpha = best_score.value;
+                if (beta <= alpha) return best_score;
+            }
+        }
+
+        // there must have been a living branch because game did not tie yet
+        assert(!no_score);
+
+        return best_score;
+    }
+
+    Move operator () (const MacroBoard &macro_board, u8 player){
+        this->macro_board = macro_board;
+
+        MacroScore score = descend(player, lookahead);
+
+        return score.moves[macro_board.moves.size()];
+    }
+};
+
+#include "timer.hpp"
+
+void test();
+
 int main(){
+#if 1
+    MicroBoard micro_board;
+    for (u32 i = 0; i < (1 << 18); i++){
+        micro_board.fields = i;
+        u32 n_set = 0;
+        for (u8 move = 0; move < 9; move++){
+            n_set += micro_board.get(move) != NONE;
+        }
+        u32 result = n_set == 9 ? TIE : NONE;
+        if (is_winner(micro_board, 1)) result = 1;
+        if (is_winner(micro_board, 2)) result = 2;
 
-    play();
-/*
+        micro_board_winner[i] = result;
+        micro_board_score[i] = micro_board.heuristic();
+    }
+    printf("small board winners calculated\n");
+#endif
+    test();
+
     Timer timer;
+    int winners[4] = {0, 0, 0, 0};
+    for (int i = 0; i < 100; i++){
+        MacroAlphaBeta opponent(3);
+        u8 winner = get_winner(get_random_move, opponent);
+        winners[winner]++;
+    }
+    printf("dt: %f seconds\n", timer.stop());
+    for (int i = 0; i < 4; i++){
+        printf("%i: %i\n", i, winners[i]);
+    }
 
-    Node root;
-    double result = alphabeta(root, 10, -INF, +INF, 1);
-    printf("%f\n", timer.stop());
-    printf("result: %f\n", result);
-    printf("\n");
-
-    root.small_board[0].winner = 1;
-    for (int depth = 0; depth < 10; depth++) printf("%i: %f\n", depth, alphabeta(root, depth, -INF, +INF, 2));
-    printf("\n");
-    root.small_board[2].winner = 2;
-    for (int depth = 0; depth < 10; depth++) printf("%i: %f\n", depth, alphabeta(root, depth, -INF, +INF, 1));
-*/
     return 0;
+}
+
+void test(){
+    // Test tie small board
+    MicroBoard micro_board;
+    assert(NONE == micro_board.play(0, 1));
+    assert(NONE == micro_board.play(1, 1));
+    assert(NONE == micro_board.play(2, 2));
+    assert(NONE == micro_board.play(3, 2));
+    assert(NONE == micro_board.play(4, 2));
+    assert(NONE == micro_board.play(5, 1));
+    assert(NONE == micro_board.play(6, 1));
+    assert(NONE == micro_board.play(7, 1));
+    assert(TIE  == micro_board.play(8, 2));
+
+    // Test win small board player 1
+    micro_board = MicroBoard();
+    assert(NONE == micro_board.play(0, 1));
+    assert(NONE == micro_board.play(1, 1));
+    assert(1    == micro_board.play(2, 1));
+
+    // Test win small board player 2
+    micro_board = MicroBoard();
+    assert(NONE == micro_board.play(0, 2));
+    assert(NONE == micro_board.play(1, 2));
+    assert(2    == micro_board.play(2, 2));
+
+    // Test win big board player 1
+    MacroBoard macro_board;
+    assert(NONE == macro_board.play(Move{0, 1}, 1));
+    assert(NONE == macro_board.play(Move{1, 2}, 1));
+    assert(NONE == macro_board.play(Move{2, 0}, 1));
+    //assert(macro_board.next_big_move == 0);
+    assert(NONE == macro_board.play(Move{0, 2}, 1));
+    assert(NONE == macro_board.play(Move{2, 1}, 1));
+    assert(NONE == macro_board.play(Move{1, 0}, 1));
+
+    assert(NONE == macro_board.play(Move{0, 0}, 1));
+    assert(macro_board.winners.get(0) == 1);
+    assert(!macro_board.can_play(Move{0, 3}));
+
+    assert(NONE == macro_board.play(Move{1, 1}, 1));
+    assert(macro_board.winners.get(1) == 1);
+    assert(!macro_board.can_play(Move{1, 4}));
+
+    assert(1 == macro_board.play(Move{2, 2}, 1));
+    assert(macro_board.winners.get(2) == 1);
+    assert(!macro_board.can_play(Move{2, 5}));
 }
