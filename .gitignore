@@ -30,3 +30,5 @@ obj
 *.exe
 *.out
 *.app
+main
+

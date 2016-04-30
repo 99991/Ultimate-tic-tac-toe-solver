@@ -265,7 +265,7 @@ struct MacroAlphaBeta {
         u8 opponent = player ^ 3;
 
         if (depth == 0){
-#if 0
+#if 1
             int score = macro_board.winners.heuristic();
 #else
             int score = micro_board_score[macro_board.winners.fields];
