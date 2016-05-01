@@ -502,12 +502,14 @@ struct MacroAlphaBeta {
     }
 };
 
+#include "timer.hpp"
+
+void test();
+
 MacroBoard from_buffer(const Array<char, MAX_MOVES> &buffer, int x0, int y0){
     MacroBoard macro_board;
     int k = 0;
-    if (x0 != -1 && y0 != -1){
-        macro_board.moves.push_back(Move{66, u8(x0 + y0*3)});
-    }
+    macro_board.moves.push_back(Move{66, u8(x0 + y0*3)});
     for (int y = 0; y < 3; y++){
         for (int i = 0; i < 3; i++){
             for (int x = 0; x < 3; x++){
@@ -547,6 +549,8 @@ int main(){
 #endif
     }
 
+    test();
+
     {
 
         char player_symbol;
@@ -574,15 +578,6 @@ int main(){
 
         Move move = get_smart_move(macro_board, player);
 
-        int x_big, y_big, x_small, y_small;
-
-        x_big = move.big_move % 3;
-        y_big = move.big_move / 3;
-        x_small = move.small_move % 3;
-        y_small = move.small_move / 3;
-        printf("%i %i %i %i\n", y_big, x_big, y_small, x_small);
-
-/*
         u8 next_player = NEXT_PLAYER(player);
 
         puts(next_player == 1 ? "X" : "O");
@@ -591,12 +586,147 @@ int main(){
         y = move.small_move / 3;
         printf("%u %u\n", y, x);
 
+        //printf("move: %u %u\n", move.big_move, move.small_move);
         macro_board.play(move, player);
 
         macro_board.print();
+/*
+        for (int y = 0; y < 9; y++){
+            for (int x = 0; x < 9; x++){
+                printf("%c ", buffer[x + y*9]);
+            }
+            printf("\n");
+        }
+        printf("\n");
         */
     }
 
+#if 0
+    Timer timer;
+    int winners[4] = {0, 0, 0, 0};
+    Array<Array<int, 9>, 9> win = {};
+    Array<Array<int, 9>, 9> loss = {};
+    for (int i = 0; i < 10*100; i++){
+        NineMoves move_order{4, 1, 3, 5, 7, 0, 2, 6, 8}; // 430
+        // Scores with weights1
+        //NineMoves move_order{4, 0, 2, 6, 8, 1, 3, 5, 7}; // 379
+        //NineMoves move_order{1, 3, 5, 7, 4, 0, 2, 6, 8}; // 359
+        //NineMoves move_order{1, 3, 5, 7, 0, 2, 6, 8, 4}; // 373
+        //NineMoves move_order{0, 2, 6, 8, 4, 1, 3, 5, 7}; // 400
+        //NineMoves move_order{0, 2, 6, 8, 1, 3, 5, 7, 4}; // 358
+
+/*
+        Weights uniform_weights{
+            1, 1, 1,
+            1, 1, 1,
+            1, 1, 1,
+        };
+*/
+        //shuffle(move_order.begin(), move_order.end());
+        MacroAlphaBeta get_smart_move_a(2, default_weights, move_order);
+
+        shuffle(move_order.begin(), move_order.end());
+        MacroAlphaBeta get_smart_move_b(2, default_weights, move_order);
+
+        Moves moves;
+        //u8 winner = get_winner(get_random_move, get_smart_move_b, moves);
+        u8 winner = get_winner(get_smart_move_a, get_smart_move_b, moves);
+        //u8 winner = get_winner(get_random_move, get_random_move, moves);
+        //u8 winner = get_winner(get_smart_move, get_random_move, moves);
+        Move first_move = moves[0];
+        if (winner == 1) win[first_move.big_move][first_move.small_move]++;
+        if (winner == 2) loss[first_move.big_move][first_move.small_move]++;
+        winners[winner]++;
+    }
+
+    double dt = timer.stop();
+
+
+    for (int i = 0; i < 3; i++) printf("+-------");
+    printf("+\n");
+
+    for (int y = 0; y < 3; y++){
+        for (int i = 0; i < 3; i++){
+            printf("| ");
+            for (int x = 0; x < 3; x++){
+                for (int j = 0; j < 3; j++){
+                    int a = win[y*3 + x][j + i*3];
+                    int b = loss[y*3 + x][j + j*3];
+                    printf("%4i ", a - b);
+                }
+                printf("| ");
+            }
+            printf("\n");
+        }
+
+        for (int i = 0; i < 3; i++) printf("+-------");
+        printf("+\n");
+    }
+
+#if 0
+    for (u8 big_move = 0; big_move < 9; big_move++){
+        printf("%i: ", big_move);
+        for (u8 small_move = 0; small_move < 9; small_move++){
+            int a = win[big_move][small_move];
+            int b = loss[big_move][small_move];
+            printf("%3i ", a - b);
+        }
+        printf("\n");
+    }
+#endif
+    printf("dt: %f seconds\n", dt);
+
+    for (int i = 0; i < 4; i++){
+        printf("%i: %i\n", i, winners[i]);
+    }
+#endif
     return 0;
 }
 
+void test(){
+    // Test tie small board
+    MicroBoard micro_board;
+    assert(NONE == micro_board.play(0, 1));
+    assert(NONE == micro_board.play(1, 1));
+    assert(NONE == micro_board.play(2, 2));
+    assert(NONE == micro_board.play(3, 2));
+    assert(NONE == micro_board.play(4, 2));
+    assert(NONE == micro_board.play(5, 1));
+    assert(NONE == micro_board.play(6, 1));
+    assert(NONE == micro_board.play(7, 1));
+    assert(TIE  == micro_board.play(8, 2));
+
+    // Test win small board player 1
+    micro_board = MicroBoard();
+    assert(NONE == micro_board.play(0, 1));
+    assert(NONE == micro_board.play(1, 1));
+    assert(1    == micro_board.play(2, 1));
+
+    // Test win small board player 2
+    micro_board = MicroBoard();
+    assert(NONE == micro_board.play(0, 2));
+    assert(NONE == micro_board.play(1, 2));
+    assert(2    == micro_board.play(2, 2));
+
+    // Test win big board player 1
+    MacroBoard macro_board;
+    assert(NONE == macro_board.play(Move{0, 1}, 1));
+    assert(NONE == macro_board.play(Move{1, 2}, 1));
+    assert(NONE == macro_board.play(Move{2, 0}, 1));
+    //assert(macro_board.next_big_move == 0);
+    assert(NONE == macro_board.play(Move{0, 2}, 1));
+    assert(NONE == macro_board.play(Move{2, 1}, 1));
+    assert(NONE == macro_board.play(Move{1, 0}, 1));
+
+    assert(NONE == macro_board.play(Move{0, 0}, 1));
+    assert(macro_board.winners.get(0) == 1);
+    assert(!macro_board.can_play(Move{0, 3}));
+
+    assert(NONE == macro_board.play(Move{1, 1}, 1));
+    assert(macro_board.winners.get(1) == 1);
+    assert(!macro_board.can_play(Move{1, 4}));
+
+    assert(1 == macro_board.play(Move{2, 2}, 1));
+    assert(macro_board.winners.get(2) == 1);
+    assert(!macro_board.can_play(Move{2, 5}));
+}
