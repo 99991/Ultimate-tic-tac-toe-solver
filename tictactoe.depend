@@ -1,7 +1,9 @@
 # depslib dependency file v1.0
-1462127750 source:c:\users\john\desktop\zxdfvxc\main.cpp
-	"common.hpp"
-	"timer.hpp"
+1462271481 source:c:\users\john\desktop\zxdfvxc\main.cpp
+	<stdio.h>
+	<stdlib.h>
+	<stdint.h>
+	<limits.h>
 
 1461944020 c:\users\john\desktop\zxdfvxc\array_set.hpp
 	<assert.h>

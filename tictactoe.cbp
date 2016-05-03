@@ -31,7 +31,6 @@
 		<Compiler>
 			<Add option="-Wall" />
 		</Compiler>
-		<Unit filename="common.hpp" />
 		<Unit filename="main.cpp" />
 		<Extensions>
 			<code_completion />

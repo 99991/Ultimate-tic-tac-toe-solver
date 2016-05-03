@@ -1,3 +1,5 @@
+// Copyright PrologIsShit 2016 (C) All Rights Reserved
+
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -289,11 +291,7 @@ struct MacroBoard {
     }
 
     u8 play(Move move, u8 player){
-        if (!can_play(move)){
-            printf("ERROR: player %u wants to play invalid move (%u, %u)\n", player, move.big_move, move.small_move);
-            print();
-            assert(can_play(move));
-        }
+        assert(can_play(move));
 
         moves.push_back(move);
 
@@ -378,7 +376,11 @@ Move get_random_move(const MacroBoard &macro_board, u8 player){
 }
 
 template <typename GET_MOVE_PLAYER1, typename GET_MOVE_PLAYER2>
-u8 get_winner(MacroBoard &macro_board, GET_MOVE_PLAYER1 &get_move_player1, GET_MOVE_PLAYER2 &get_move_player2, u8 player, Moves &moves){
+u8 get_winner(GET_MOVE_PLAYER1 &get_move_player1, GET_MOVE_PLAYER2 &get_move_player2, Moves &moves){
+    MacroBoard macro_board;
+
+    u8 player = 1;
+
     for (int round = 0; round < MAX_MOVES; round++){
 
         Move move;
@@ -415,8 +417,8 @@ struct MacroAlphaBeta {
 
     MacroAlphaBeta(
         int lookahead,
-        const Weights &weights = default_weights,
-        const NineMoves &move_order = default_move_order
+        const Weights &weights,
+        const NineMoves &move_order
     ):
         lookahead(lookahead),
         weights(weights),
@@ -533,6 +535,32 @@ MacroBoard from_buffer(const Array<char, MAX_MOVES> &buffer, int x0, int y0){
     return macro_board;
 }
 
+MacroBoard from_ints(const int *values, int x0, int y0){
+    MacroBoard macro_board;
+    int k = 0;
+    if (x0 != -1 && y0 != -1){
+        macro_board.moves.push_back(Move{66, u8(x0 + y0*3)});
+    }
+    for (int y = 0; y < 3; y++){
+        for (int i = 0; i < 3; i++){
+            for (int x = 0; x < 3; x++){
+                for (int j = 0; j < 3; j++){
+                    u8 move = i*3 + j;
+                    int player = values[k++];
+                    assert(player == 0 || player == 1 || player == 2);
+                    macro_board.micro_boards[x + y*3].unsafe_set(move, player);
+                }
+            }
+        }
+    }
+    for (u8 move = 0; move < 9; move++){
+        u8 player = macro_board.micro_boards[move].update();
+        if (player == NONE) continue;
+        macro_board.winners.play(move, player);
+    }
+    return macro_board;
+}
+
 void init(){
     MicroBoard micro_board;
     for (u32 i = 0; i < (1 << 18); i++){
@@ -547,55 +575,11 @@ void init(){
     }
 }
 
-Move get_probable_move(const MacroBoard &macro_board0, u8 player){
-    Array<Array<int, 9>, 9> scores = {};
-    Array<Array<int, 9>, 9> counts = {};
-
-    for (int i = 0; i < 100*1000; i++){
-        MacroBoard macro_board = macro_board0;
-        Moves moves;
-        u8 winner = get_winner(macro_board, get_random_move, get_random_move, player, moves);
-        Move first_move = moves[0];
-        counts[first_move.big_move][first_move.small_move]++;
-        if (winner == player){
-            scores[first_move.big_move][first_move.small_move] += 1;
-        }
-        if (winner != player){
-            scores[first_move.big_move][first_move.small_move] -= 1;
-        }
-    }
-
-    int max_score = INT_MIN;
-    bool no_move = true;
-    Move move;
-
-    for (u8 big_move = 0; big_move < 9; big_move++){
-        for (u8 small_move = 0; small_move < 9; small_move++){
-            if (counts[big_move][small_move] == 0) continue;
-            int score = scores[big_move][small_move];
-            if (no_move || max_score < score){
-                max_score = score;
-                no_move = false;
-                move = Move{big_move, small_move};
-            }
-        }
-    }
-
-    return move;
-}
-
+#if 0
 int main(){
+
     init();
 
-    for (int i = 0; i < 10; i++){
-        Moves moves;
-        MacroBoard macro_board;
-        MacroAlphaBeta get_smart_move(6);
-        // lookahead 6, probable move wins 8/10 on first turn and 7/10 on second turn
-        u8 winner = get_winner(macro_board, get_probable_move, get_smart_move, 1, moves);
-        printf("winner: %u\n", winner);
-    }
-#if 0
     {
 
         char player_symbol;
@@ -645,7 +629,236 @@ int main(){
         macro_board.print();
         */
     }
-#endif
+
     return 0;
 }
 
+#endif
+
+
+#include <iostream>
+#include <algorithm>
+#include <sstream>
+#include <time.h>
+
+std::vector<std::string> &split(const std::string &s, char delim, std::vector<std::string> &elems) {
+    std::stringstream ss(s);
+    std::string item;
+    elems.clear();
+    while (std::getline(ss, item, delim)) {
+        elems.push_back(item);
+    }
+    return elems;
+}
+
+
+int stringToInt(const std::string &s) {
+    std::istringstream ss(s);
+    int result;
+    ss >> result;
+    return result;
+}
+
+#include "timer.hpp"
+
+/**
+ * This class implements all IO operations.
+ * Only one method must be realized:
+ *
+ *      > BotIO::action
+ *
+ */
+class BotIO
+{
+
+public:
+
+    /**
+     * Initialize your bot here.
+     */
+    BotIO() {
+        srand(static_cast<unsigned int>(time(0)));
+        _field.resize(81);
+        _macroboard.resize(9);
+
+    }
+
+
+    void loop() {
+        std::string line;
+        std::vector<std::string> command;
+        command.reserve(256);
+
+        while (std::getline(std::cin, line)) {
+            processCommand(split(line, ' ', command));
+        }
+    }
+
+private:
+
+    std::pair<int, int> action(const std::string &type, int time) {
+        int x0 = -1;
+        int y0 = -1;
+        int n = 0;
+        for (int y = 0; y < 3; y++){
+            for (int x = 0; x < 3; x++){
+                if (_macroboard[x + y*3] == -1){
+                    n++;
+                    x0 = x;
+                    y0 = y;
+                }
+            }
+        }
+        if (n > 1){
+            x0 = -1;
+            y0 = -1;
+        }
+
+        u8 player = _botId;
+        assert(player == 1 || player == 2);
+
+        MacroBoard macro_board = from_ints(_field.data(), x0, y0);
+
+        MacroAlphaBeta get_smart_move(6, default_weights, default_move_order);
+
+        Timer timer;
+
+        Move move = get_smart_move(macro_board, player);
+
+        double dt = timer.stop();
+
+        printf("%f milliseconds\n", dt*1000);
+
+        int x = (move.big_move%3)*3 + (move.small_move%3);
+        int y = (move.big_move/3)*3 + (move.small_move/3);
+
+        return std::make_pair(x, y);
+    }
+#if 0
+    /**
+     * Implement this function.
+     * type is always "move"
+     *
+     * return value must be position in x,y presentation
+     *      (use std::make_pair(x, y))
+     */
+    std::pair<int, int> action(const std::string &type, int time) {
+        return getRandomFreeCell();
+    }
+
+    /**
+     * Returns random free cell.
+     * It can be used to make your bot more immune to errors
+     * Use next pattern in action method:
+     *
+     *      try{
+     *          ... YOUR ALGORITHM ...
+     *      }
+     *      catch(...) {
+     *          return getRandomCell();
+     *      }
+     *
+     */
+    std::pair<int, int> getRandomFreeCell() const {
+        debug("Using random algorithm.");
+        std::vector<int> freeCells;
+        for (int i = 0; i < 81; ++i){
+            int blockId = ((i/27)*3) + (i%9)/3;
+            if (_macroboard[blockId] == -1 && _field[i] == 0){
+                freeCells.push_back(i);
+            }
+        }
+        int randomCell = freeCells[rand()%freeCells.size()];
+        return std::make_pair(randomCell%9, randomCell/9);
+    }
+#endif
+    void processCommand(const std::vector<std::string> &command) {
+        if (command[0] == "action") {
+            auto point = action(command[1], stringToInt(command[2]));
+            std::cout << "place_move " << point.first << " " << point.second << std::endl << std::flush;
+        }
+        else if (command[0] == "update") {
+            update(command[1], command[2], command[3]);
+        }
+        else if (command[0] == "settings") {
+            setting(command[1], command[2]);
+        }
+        else {
+            debug("Unknown command <" + command[0] + ">.");
+        }
+    }
+
+    void update(const std::string& player, const std::string& type, const std::string& value) {
+        if (player != "game" && player != _myName) {
+            // It's not my update!
+            return;
+        }
+
+        if (type == "round") {
+            _round = stringToInt(value);
+        }
+        else if (type == "move") {
+            _move = stringToInt(value);
+        }
+        else if (type == "macroboard" || type == "field") {
+            std::vector<std::string> rawValues;
+            split(value, ',', rawValues);
+            std::vector<int>::iterator choice = (type == "field" ? _field.begin() : _macroboard.begin());
+            std::transform(rawValues.begin(), rawValues.end(), choice, stringToInt);
+        }
+        else {
+            debug("Unknown update <" + type + ">.");
+        }
+    }
+
+    void setting(const std::string& type, const std::string& value) {
+        if (type == "timebank") {
+            _timebank = stringToInt(value);
+        }
+        else if (type == "time_per_move") {
+            _timePerMove = stringToInt(value);
+        }
+        else if (type == "player_names") {
+            split(value, ',', _playerNames);
+        }
+        else if (type == "your_bot") {
+            _myName = value;
+        }
+        else if (type == "your_botid") {
+            _botId = stringToInt(value);
+        }
+        else {
+            debug("Unknown setting <" + type + ">.");
+        }
+    }
+
+    void debug(const std::string &s) const{
+        std::cerr << s << std::endl << std::flush;
+    }
+
+private:
+    // static settings
+    int _timebank;
+    int _timePerMove;
+    int _botId;
+    std::vector<std::string> _playerNames;
+    std::string _myName;
+
+    // dynamic settings
+    int _round;
+    int _move;
+    std::vector<int> _macroboard;
+    std::vector<int> _field;
+};
+
+/**
+ * don't change this code.
+ * See BotIO::action method.
+ **/
+int main() {
+    init();
+
+    BotIO bot;
+    bot.loop();
+    return 0;
+}
